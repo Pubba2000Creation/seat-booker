@@ -1,0 +1,41 @@
+{
+  "name": "seat-booker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workshop registration service for a community training centre",
+  "packageManager": "pnpm@9.12.1",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose stop postgres",
+    "db:reset": "docker compose rm -sf postgres && docker volume rm -f seat-booker_seat-booker-pgdata && docker compose up -d postgres",
+    "app:up": "docker compose up -d --build",
+    "app:down": "docker compose down",
+    "app:reset": "docker compose down -v && docker compose up -d --build",
+    "app:logs": "docker compose logs -f",
+    "app:status": "docker compose ps",
+    "app:rebuild": "docker compose build --no-cache && docker compose up -d",
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @seat-booker/api dev",
+    "dev:web": "pnpm --filter @seat-booker/web dev",
+    "build": "pnpm --filter \"./packages/*\" build && pnpm --filter \"./apps/*\" build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @seat-booker/api test:e2e",
+    "test:concurrency": "pnpm --filter @seat-booker/api test:concurrency",
+    "db:generate": "pnpm --filter @seat-booker/api db:generate",
+    "db:migrate": "pnpm --filter @seat-booker/api db:migrate",
+    "db:studio": "pnpm --filter @seat-booker/api db:studio",
+    "seed": "pnpm --filter @seat-booker/api seed",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,yaml,yml,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,yaml,yml,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,31 @@
+@import 'tailwindcss';
+
+/*
+ * Base styles only — everything else is Tailwind utilities in the markup, per the project
+ * conventions. No class-name system is invented here; a repeated pattern becomes a
+ * component instead.
+ */
+
+@layer base {
+  html {
+    /* Staff scan tables all day; a tabular-friendly, system-native stack reads fastest. */
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+      sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* Numbers in seat counters and tables must not shift width as they change. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The native <dialog> backdrop needs this to animate in rather than snap. */
+  dialog::backdrop {
+    backdrop-filter: blur(2px);
+  }
+}

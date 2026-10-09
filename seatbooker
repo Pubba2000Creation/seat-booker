@@ -1,0 +1,75 @@
+#!/usr/bin/env sh
+# One-command control for the whole local stack (db + api + web).
+#
+#   ./seatbooker up        build if needed, start everything, wait, print URLs
+#   ./seatbooker down      stop everything (data kept)
+#   ./seatbooker reset     stop and DELETE the database volume, then start fresh
+#   ./seatbooker logs      follow logs from all three services
+#   ./seatbooker status    show what is running
+#   ./seatbooker rebuild   force a no-cache image rebuild, then start
+set -e
+
+cd "$(dirname "$0")"
+
+COMPOSE="docker compose"
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+case "${1:-up}" in
+  up)
+    $COMPOSE up -d --build
+    echo ""
+    echo "Waiting for the API to answer ..."
+    # The API container runs migrations and the seed before it listens, so any
+    # HTTP response means the stack is genuinely ready. There is no /health
+    # route, so this probes the public login endpoint and accepts ANY status:
+    # a 400 for the empty body still proves the server is up and routing.
+    i=1
+    while [ "$i" -le 60 ]; do
+      if curl -s -o /dev/null -X POST http://localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{}' 2>/dev/null; then
+        break
+      fi
+      i=$((i + 1))
+      sleep 2
+    done
+    echo ""
+    echo "  Frontend   http://localhost:5173"
+    echo "  API        http://localhost:3000/api"
+    echo "  Postgres   localhost:5433  (user/password/db: seatbooker)"
+    echo ""
+    echo "  Logins     admin@centre.dev / Admin123!   (see README for all roles)"
+    echo ""
+    echo "  Logs       ./seatbooker logs"
+    echo "  Stop       ./seatbooker down"
+    ;;
+  down)
+    $COMPOSE down
+    ;;
+  reset)
+    # -v drops the named volume, so the next `up` re-migrates and re-seeds from
+    # an empty database.
+    $COMPOSE down -v
+    $COMPOSE up -d --build
+    ;;
+  logs)
+    $COMPOSE logs -f
+    ;;
+  status)
+    $COMPOSE ps
+    ;;
+  rebuild)
+    $COMPOSE build --no-cache
+    $COMPOSE up -d
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $1" >&2
+    echo "" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

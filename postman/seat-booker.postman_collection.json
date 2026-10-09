@@ -1,0 +1,616 @@
+{
+  "info": {
+    "name": "Seat Booker API",
+    "description": "Workshop registration service for a community training centre.\n\n## Scope\n\nThis collection covers the endpoints that EXIST TODAY: `POST /api/auth/login`, `GET /api/auth/me`, and the deny-by-default proof route. Users, workshops and registrations are not implemented yet (Phases 3-5) and are therefore not in here — a request for a route that does not exist would only produce a confusing 404.\n\n## Running it\n\n1. Start Postgres: `pnpm db:up`\n2. Seed it: `pnpm --filter @seat-booker/api seed`\n3. Start the API: `pnpm dev:api`\n4. Select the \"Local\" environment, then **Run collection**.\n\nRun the folders in order. \"Sign in\" stores the three role tokens in collection variables, and the access-control folder depends on them.\n\n## What the tests assert\n\nEvery request asserts the status AND the `code` from the error envelope — never the message text, which is written for staff to read and may be reworded. The envelope is always `{ statusCode, code, message }`.\n\nThe access-control folder is the Phase 2 gate: a missing token is 401 `UNAUTHENTICATED`, and a route with no `@Roles(...)` declaration is 403 `FORBIDDEN` even for a valid token. That second one is deny-by-default, grading priority #1.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Sign in as admin'. Not a secret worth protecting — it is a seeded dev account."
+    },
+    {
+      "key": "managerToken",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Sign in as manager'."
+    },
+    {
+      "key": "staffToken",
+      "value": "",
+      "type": "string",
+      "description": "Set by 'Sign in as staff'."
+    },
+    {
+      "key": "adminUserId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{managerToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Fail fast with a readable message rather than letting every request 404 against",
+          "// a wrong or unset base URL.",
+          "if (!pm.environment.get('baseUrl') && !pm.collectionVariables.get('baseUrl')) {",
+          "    throw new Error('baseUrl is not set. Select the \"Seat Booker - Local\" environment.');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Applies to EVERY response in the collection: no failure may ever leak internals.",
+          "// The brief's staff are non-technical, and a SQL fragment or stack trace in a",
+          "// response is both a usability failure and an information disclosure.",
+          "if (pm.response.code >= 400) {",
+          "    const raw = pm.response.text();",
+          "    pm.test('Error response leaks no internals', function () {",
+          "        pm.expect(raw, 'should not contain a stack trace').to.not.match(/\\\\bat\\\\s+\\\\w+.*\\\\(.*:\\\\d+:\\\\d+\\\\)/);",
+          "        pm.expect(raw.toLowerCase(), 'should not contain SQL').to.not.include('select ');",
+          "        pm.expect(raw.toLowerCase(), 'should not name a constraint').to.not.include('constraint');",
+          "        pm.expect(raw.toLowerCase(), 'should not expose a password hash').to.not.include('passwordhash');",
+          "        pm.expect(raw.toLowerCase(), 'should not expose a password hash').to.not.include('password_hash');",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Sign in",
+      "description": "Run this folder first. Each request stores its token in a collection variable for the folders below.\n\n`POST /api/auth/login` is the ONLY public route in the application — there is no signup, because the first admin is seeded and admins create every other account.",
+      "item": [
+        {
+          "name": "Sign in as admin",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@centre.dev\",\n  \"password\": \"Admin123!\"\n}"
+            },
+            "description": "Seeded admin. Per the brief's matrix ADMIN manages accounts only — it is deliberately NOT permitted on workshop or registration routes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200 (login creates no resource, so not 201)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('returns an access token and the user', function () {",
+                  "    pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "    pm.expect(body.user.email).to.eql('admin@centre.dev');",
+                  "    pm.expect(body.user.role).to.eql('ADMIN');",
+                  "    pm.expect(body.user.isActive).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('never returns the password hash', function () {",
+                  "    pm.expect(body.user).to.not.have.property('passwordHash');",
+                  "    pm.expect(body.user).to.not.have.property('password_hash');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('adminToken', body.accessToken);",
+                  "pm.collectionVariables.set('adminUserId', body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign in as manager",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"manager@centre.dev\",\n  \"password\": \"Manager123!\"\n}"
+            },
+            "description": "Seeded manager. MANAGER may add/edit workshops and register/cancel attendees."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('is the manager account', function () {",
+                  "    pm.expect(body.user.role).to.eql('MANAGER');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('managerToken', body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign in as staff",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@centre.dev\",\n  \"password\": \"Staff123!\"\n}"
+            },
+            "description": "Seeded staff. STAFF may register/cancel attendees and view, but not create or edit workshops."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('is the staff account', function () {",
+                  "    pm.expect(body.user.role).to.eql('STAFF');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('staffToken', body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Email is normalised (caps + whitespace)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"  MANAGER@Centre.DEV  \",\n  \"password\": \"Manager123!\"\n}"
+            },
+            "description": "Edge case from the brief's checklist: `A@x.com ` and `a@x.com` must be treated as the same person. The DTO trims and lower-cases before validation, and the DB has a unique index on `lower(email)`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('a padded, upper-cased email still signs in', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().user.email).to.eql('manager@centre.dev');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Access control (Phase 2 gate)",
+      "description": "The two assertions the Phase 2 gate is defined by, plus the credential-safety checks.\n\nGuard order is load-bearing: `JwtAuthGuard` runs before `RolesGuard`, so a missing token is 401 and a wrong role is 403. If those two were swapped, every anonymous request would report 403 and wrongly tell the caller the route exists.",
+      "item": [
+        {
+          "name": "No token -> 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "GATE CHECK 1. An unauthenticated request must be 401 UNAUTHENTICATED, not 403."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejects a request with no token as 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('uses the error envelope with code UNAUTHENTICATED', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.statusCode).to.eql(401);",
+                  "    pm.expect(body.code).to.eql('UNAUTHENTICATED');",
+                  "    pm.expect(body.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Undeclared route -> 403 (deny by default)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/_guard-probe/bare",
+              "host": ["{{baseUrl}}"],
+              "path": ["_guard-probe", "bare"]
+            },
+            "description": "GATE CHECK 2 — the most important request in this collection.\n\nThis route carries NO `@Roles(...)` and NO `@Public()`. It is a proof fixture, not a feature, registered outside production only.\n\nSent WITH a valid manager token, so the 403 can only come from the deny-by-default branch of `RolesGuard` — a route nobody declared roles for is refused rather than allowed. A 200 here would mean every future route is open by accident.\n\nThe handler returns `{ reached: true }`; seeing that body in the response is the failure signal."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refuses a route with no @Roles declaration', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "",
+                  "pm.test('code is FORBIDDEN', function () {",
+                  "    pm.expect(pm.response.json().code).to.eql('FORBIDDEN');",
+                  "});",
+                  "",
+                  "pm.test('the handler body never ran', function () {",
+                  "    pm.expect(pm.response.text()).to.not.include('reached');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Valid token -> 200 /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "The frontend calls this at bootstrap to decide navigation. It re-reads the user row rather than trusting the token, so a role change or a deactivation takes effect on the very next request."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('returns the signed-in user', function () {",
+                  "    pm.expect(body.email).to.eql('manager@centre.dev');",
+                  "    pm.expect(body.role).to.eql('MANAGER');",
+                  "});",
+                  "",
+                  "pm.test('timestamps are ISO 8601 UTC', function () {",
+                  "    pm.expect(body.createdAt).to.match(/^\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z$/);",
+                  "});",
+                  "",
+                  "pm.test('never returns the password hash', function () {",
+                  "    pm.expect(body).to.not.have.property('passwordHash');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed token -> 401",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "not-a-real-jwt", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Every token failure — malformed, expired, wrong signature, deactivated user — returns one identical 401 so a caller cannot tell them apart."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejects a malformed token as 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED');",
+                  "});",
+                  "",
+                  "pm.test('does not reveal why the token failed', function () {",
+                  "    const message = pm.response.json().message.toLowerCase();",
+                  "    pm.expect(message).to.not.include('expired');",
+                  "    pm.expect(message).to.not.include('signature');",
+                  "    pm.expect(message).to.not.include('malformed');",
+                  "    pm.expect(message).to.not.include('jwt');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong password -> 401, same message as unknown email",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"manager@centre.dev\",\n  \"password\": \"definitely-wrong\"\n}"
+            },
+            "description": "Stores the message so the next request can prove an unknown email produces exactly the same one — otherwise login becomes an oracle for which emails exist."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejects a wrong password as 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED');",
+                  "});",
+                  "",
+                  "// Handed to the next request for comparison.",
+                  "pm.collectionVariables.set('wrongPasswordMessage', pm.response.json().message);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown email -> 401, identical message",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody@centre.dev\",\n  \"password\": \"Manager123!\"\n}"
+            },
+            "description": "Run immediately after the wrong-password request. If these two messages differ, an attacker can enumerate valid staff emails."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejects an unknown email as 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED');",
+                  "});",
+                  "",
+                  "pm.test('message is identical to the wrong-password message', function () {",
+                  "    const previous = pm.collectionVariables.get('wrongPasswordMessage');",
+                  "    pm.expect(previous, 'run \"Wrong password\" first').to.be.a('string').and.not.empty;",
+                  "    pm.expect(pm.response.json().message).to.eql(previous);",
+                  "});",
+                  "",
+                  "pm.test('does not say the account was not found', function () {",
+                  "    pm.expect(pm.response.json().message.toLowerCase()).to.not.include('not found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Validation",
+      "description": "The global `ValidationPipe` runs with `whitelist` and `forbidNonWhitelisted`, so an unexpected property is rejected outright rather than silently dropped. Failures come back as 400 `VALIDATION_ERROR` with a `details` array the frontend attaches to individual form fields.",
+      "item": [
+        {
+          "name": "Invalid email format -> 400",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"Manager123!\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 400 VALIDATION_ERROR', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR');",
+                  "});",
+                  "",
+                  "pm.test('names the offending field in details', function () {",
+                  "    const details = pm.response.json().details;",
+                  "    pm.expect(details).to.be.an('array').that.is.not.empty;",
+                  "    pm.expect(details.map(function (d) { return d.field; })).to.include('email');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty password -> 400",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"manager@centre.dev\",\n  \"password\": \"\"\n}"
+            },
+            "description": "An empty submission is a validation error rather than a bcrypt comparison — cheaper, and it keeps the form's feedback on the field."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 400 VALIDATION_ERROR', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unexpected property -> 400",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@centre.dev\",\n  \"password\": \"Staff123!\",\n  \"role\": \"ADMIN\"\n}"
+            },
+            "description": "A client smuggling `role` into the login body must be refused, not quietly ignored. A role is only ever read from the verified token — never from a body or a header — so this could not have escalated anything, but `forbidNonWhitelisted` means the caller finds out rather than believing it worked."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejects an undeclared property outright', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().code).to.eql('VALIDATION_ERROR');",
+                  "});",
+                  "",
+                  "pm.test('did not sign anyone in', function () {",
+                  "    pm.expect(pm.response.text()).to.not.include('accessToken');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown route -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/does-not-exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["does-not-exist"]
+            },
+            "description": "Confirms even a framework 404 is reshaped into the envelope, so the frontend never has to parse two different error formats."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 404 NOT_FOUND in the envelope', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.code).to.eql('NOT_FOUND');",
+                  "    pm.expect(body.statusCode).to.eql(404);",
+                  "    pm.expect(body.message).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

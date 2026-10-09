@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // `rootDir: src` so the emitted entry point is `dist/main.js`, matching the `start`
+    // script. The root tsconfig keeps `rootDir: "./"` because it also typechecks
+    // `drizzle.config.ts` and `test/`, which live outside `src`.
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "drizzle", "test", "**/*.spec.ts", "**/*.e2e-spec.ts"]
+}

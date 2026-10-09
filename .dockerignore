@@ -1,0 +1,45 @@
+# Build context hygiene: everything the image builds from scratch, plus anything
+# host-specific that would poison a container build (native node_modules above all).
+node_modules
+**/node_modules
+dist
+**/dist
+build
+out
+*.tsbuildinfo
+
+# Env: the compose file supplies container config. A host .env pointing at
+# 127.0.0.1:5433 would be wrong inside the container network.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.gitattributes
+
+coverage
+**/coverage
+.nyc_output
+test-results
+
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+.cache
+.turbo
+.vite
+.eslintcache
+*.log
+
+# Internal working docs
+CLAUDE.md
+.claude
+REQUIREMENTS.md
+DESIGN.md
+PLAN.md
+COMMANDS.md
+*.local.md
+postman

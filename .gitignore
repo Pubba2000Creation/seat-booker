@@ -1,0 +1,49 @@
+# ---- Dependencies ----
+node_modules/
+.pnpm-store/
+
+# ---- Build output ----
+dist/
+build/
+out/
+*.tsbuildinfo
+apps/web/dist/
+apps/api/dist/
+
+# ---- Env ----
+.env
+.env.*
+!.env.example
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+pnpm-debug.log*
+logs/
+
+# ---- Test / coverage ----
+coverage/
+.nyc_output/
+test-results/
+
+# ---- Editor / OS ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Caches ----
+.cache/
+.turbo/
+.vite/
+.eslintcache
+
+# ---- Internal working docs (not for the reviewer's repo) ----
+CLAUDE.md
+.claude/
+REQUIREMENTS.md
+DESIGN.md
+*.local.md
+PLAN.md
+COMMANDS.md

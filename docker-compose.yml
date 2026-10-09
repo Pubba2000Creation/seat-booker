@@ -1,0 +1,83 @@
+# Full local stack: database, API and frontend. Brings everything up with one
+# command (`pnpm app:up`, or `./seatbooker up`).
+#
+# Every value here is a DEVELOPMENT credential, hardcoded deliberately so a
+# reviewer can clone and run without authoring any .env file. None of it is a
+# real secret and none of it is used anywhere but a local container.
+#
+# The compose project name is left to default (the directory name, "seat-booker").
+# Setting it explicitly would orphan the existing seat-booker_seat-booker-pgdata
+# volume and silently start against an empty database.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seat-booker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: seatbooker
+      POSTGRES_PASSWORD: seatbooker
+      POSTGRES_DB: seatbooker
+    ports:
+      # Host port 5433, not 5432: a locally installed Postgres service commonly already
+      # owns 5432, and because both bind 0.0.0.0 the native one silently wins host
+      # connections, producing a confusing 28P01 auth failure. 5433 keeps the two apart.
+      # This remap affects HOST connections only (psql, the concurrency tests, drizzle
+      # studio) — containers reach this service as postgres:5432 on the compose network.
+      - '5433:5432'
+    volumes:
+      - seat-booker-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The concurrency test needs a genuinely ready DB, not just a started container.
+      test: ['CMD-SHELL', 'pg_isready -U seatbooker -d seatbooker']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      # Repo root, not apps/api: the API depends on the @seat-booker/contracts
+      # workspace package and needs the pnpm workspace in the build context.
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: seat-booker-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # postgres:5432 — the in-network service name and its REAL port. The 5433
+      # above is a host-side remap and does not exist on this network.
+      DATABASE_URL: 'postgresql://seatbooker:seatbooker@postgres:5432/seatbooker'
+      # Dev-only secret. Must clear the 32-character minimum in env.schema.ts.
+      JWT_SECRET: 'local-docker-development-secret-not-for-production-use'
+      JWT_EXPIRES_IN: '8h'
+      PORT: 3000
+      # The browser's origin for the web container, which publishes on 5173.
+      CORS_ORIGIN: 'http://localhost:5173'
+      CENTRE_TIMEZONE: 'Asia/Colombo'
+      BCRYPT_ROUNDS: 10
+      # The entrypoint runs the idempotent seed on each boot. Set false to skip.
+      SEED_ON_BOOT: 'true'
+    ports:
+      - '3000:3000'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Build-time, not runtime: Vite inlines these. This is the URL the user's
+        # BROWSER calls, so it is the published host port, not http://api:3000.
+        VITE_API_BASE_URL: 'http://localhost:3000/api'
+        VITE_CENTRE_TIMEZONE: 'Asia/Colombo'
+    container_name: seat-booker-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '5173:5173'
+
+volumes:
+  seat-booker-pgdata:
